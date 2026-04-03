@@ -1,0 +1,24 @@
+{
+  "name": "agent-client",
+  "version": "1.0.0",
+  "description": "Claude agent utilizing the OWS wallet for tool payments",
+  "main": "dist/agent.js",
+  "scripts": {
+    "start": "ts-node src/agent.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.82.0",
+    "@open-wallet-standard/core": "file:../../node_modules/@open-wallet-standard/core",
+    "@types/dotenv": "^6.1.1",
+    "@x402/fetch": "^2.0.0",
+    "dotenv": "^17.4.0",
+    "node-fetch": "^2.6.7",
+    "openai": "^6.33.0"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.130",
+    "@types/node-fetch": "^2.6.13",
+    "typescript": "^5.0.0"
+  }
+}
