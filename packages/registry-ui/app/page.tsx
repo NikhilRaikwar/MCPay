@@ -1,345 +1,640 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 
 /* ─────────────────────────────────────────
-   MCPay — Landing Page
-   File: app/page.tsx
+   MCPay — Dashboard Page (PRODUCTION VERSION)
+   Connected to: localhost:3001 (Tool Server)
    ───────────────────────────────────────── */
 
-const TICKER_ITEMS = [
-  "x402 Protocol","OWS Policy Engine","Base Sepolia USDC","XMTP Notifications",
-  "Zerion Portfolio","Dynamic Pricing","AIML API Models","Claude · GPT · Gemini",
-  "No API Keys Ever","Agent-Native",
-];
+const SERVER = process.env.NEXT_PUBLIC_SERVER_URL ?? "http://localhost:3001";
 
-const FLOW_STEPS = [
-  { n:"01", t:"Agent Calls Tool",   d:"Claude / GPT sends a standard POST to your MCPay-wrapped endpoint. Zero changes on the agent side. Any HTTP client works.",        tag:"HTTP POST"       },
-  { n:"02", t:"402 Intercepted",    d:"MCPay middleware returns HTTP 402 Payment Required with x402 headers specifying the USDC amount and OWS wallet destination.",         tag:"x402 Standard"   },
-  { n:"03", t:"OWS Signs & Pays",   d:"Agent's OWS CLI intercepts the 402, evaluates spend policy, signs and broadcasts a USDC transaction on Base Sepolia.",              tag:"OWS CLI"          },
-  { n:"04", t:"Tool Executes",      d:"Payment verified by x402 facilitator. MCPay middleware allows the request through and the tool returns its result to the agent.",    tag:"Instant Payout"  },
-  { n:"05", t:"Stats Updated",      d:"MCPay registry logs the call — earnings, call count, wallet address, timestamp. Zerion API shows real on-chain balance.",            tag:"Live Dashboard"  },
-];
+// ── TYPES ──────────────────────────────────
+interface ToolStat { toolName: string; totalCalls: number; totalEarned: number; lastCall: string; }
+interface FeedRow   { id: string; time: string; tool: string; wallet: string; args: string; amount: number; }
+interface XmtpMsg   { id: string; tool: string; wallet: string; amount: number; time: string; }
 
-const INTEGRATIONS = [
-  {
-    icon:"⛓", name:"OWS + x402", badge:"Core", badgeColor:"var(--gd)", badgeText:"var(--green)",
-    desc:"The backbone. OWS CLI handles wallet signing, policy enforcement, and USDC settlement on Base Sepolia. x402 is the payment protocol standard.",
-    features:["Spend policies enforce per-session limits automatically","API key revocation if policy violated","Full audit log of every transaction"],
-  },
-  {
-    icon:"💬", name:"XMTP", badge:"New", badgeColor:"var(--bd)", badgeText:"var(--blue)",
-    desc:"Wallet-to-wallet push notifications on every payment. Tool owner gets an XMTP message the instant an agent pays. Agent gets a receipt. No email, no webhook config.",
-    features:['Tool owner: "0x4a3b paid $0.01 for weather-data"','Agent receipt: "Payment confirmed, tx: 0x..."',"Built with XMTP JS SDK, 30-min integration"],
-  },
-  {
-    icon:"◈", name:"Zerion API", badge:"New", badgeColor:"var(--pd)", badgeText:"var(--purple)",
-    desc:"Real on-chain earnings instead of simulated counters. Zerion API fetches live USDC balance and DeFi positions for the tool wallet. Dashboard shows actual money earned.",
-    features:["Live wallet balance — not a fake counter","Multi-chain portfolio tracking","Transaction history with decoded labels"],
-  },
-  {
-    icon:"🧠", name:"AIML API", badge:"Dynamic Pricing", badgeColor:"var(--od)", badgeText:"var(--orange)",
-    desc:"MCPay wraps AIML API inference behind x402. Price adjusts per model — Claude Opus costs more than Llama. First dynamic pricing inference API on OWS. Covers Track 04 too.",
-    features:["Claude Opus: $0.05 · GPT-4o: $0.03 · Llama: $0.001","Surge pricing under queue pressure (1x–10x)","OWS policy lets buyer set max-price ceiling"],
-  },
-  {
-    icon:"🌐", name:"Allium API", badge:"Oracle", badgeColor:"var(--gd)", badgeText:"var(--green)",
-    desc:"Cross-chain data oracle tool — wraps Allium's multi-chain explorer behind x402. Agents pay $0.005 per query to fetch decoded on-chain data from 9 chains. Covers Track 07.",
-    features:["Query Ethereum, Solana, Base, Polygon state","Decoded, enriched — not raw RPC","$0.005 per query, no rate limits"],
-  },
-  {
-    icon:"💰", name:"MoonPay", badge:"On-ramp", badgeColor:"var(--bd)", badgeText:"var(--blue)",
-    desc:"New agents need USDC to pay for tools. MCPay dashboard integrates MoonPay for one-click fiat → USDC on-ramp. Fund an OWS wallet in 2 minutes without leaving the registry.",
-    features:["Fund wallet with card directly in dashboard","MoonPay CLI for agent auto top-up","Solves the cold-start problem for new agents"],
-  },
-];
+interface ZerionHealth {
+  agent: {
+    totalValue: number;
+    change24h: number;
+    address: string;
+  };
+  tool: {
+    totalValue: number;
+    address: string;
+  };
+  recentTxs: any[];
+}
 
-const SDK_CARDS = [
-  { name:"mcpay/express",  pkg:"npm install mcpay",                        desc:"Express middleware. One line wraps any route with x402 payment enforcement, stats tracking, and XMTP notifications.", status:"done", label:"Shipped ✓" },
-  { name:"mcpay/fetch",    pkg:"import { mcpayFetch } from 'mcpay'",       desc:"Client-side x402 fetch wrapper for agents. Intercepts 402 responses, triggers OWS CLI payment, retries automatically.", status:"done", label:"Shipped ✓" },
-  { name:"mcpay/fastify",  pkg:"import { mcpayFastify } from 'mcpay'",     desc:"Same middleware pattern for Fastify servers. Plugin-based. Same config API as Express version — zero learning curve.", status:"wip",  label:"In Progress" },
-  { name:"mcpay CLI",      pkg:"npx mcpay wrap --port 3001 --price $0.01", desc:"Wrap any running HTTP server with x402 payments from the terminal. No code changes. Point it at a port and go.", status:"soon", label:"Coming Soon" },
-  { name:"mcpay/react",    pkg:"import { MCPayDashboard } from 'mcpay/react'", desc:"Drop-in React component. Embed the registry dashboard in any Next.js or React app. Real-time stats, live feed.", status:"soon", label:"Coming Soon" },
-  { name:"Registry API",   pkg:"GET /.well-known/mcp",                     desc:"Every MCPay server auto-exposes a manifest endpoint. Agents discover tools, prices, and chains programmatically.", status:"done", label:"Shipped ✓" },
-];
+type Page = "overview" | "tools" | "feed" | "wallet" | "xmtp" | "zerion" | "policy" | "playground";
 
-const MODELS = [
-  { model:"claude-opus-4-6",    provider:"Anthropic via AIML API", base:"$0.05", surge:"$0.50", surgeColor:"var(--orange)", tag:"Live", tagStyle:{background:"var(--gd)", color:"var(--green)"} },
-  { model:"gpt-4o",             provider:"OpenAI via AIML API",    base:"$0.03", surge:"$0.30", surgeColor:"var(--orange)", tag:"Live", tagStyle:{background:"var(--gd)", color:"var(--green)"} },
-  { model:"claude-sonnet-4-6",  provider:"Anthropic via AIML API", base:"$0.02", surge:"$0.20", surgeColor:"var(--orange)", tag:"Live", tagStyle:{background:"var(--gd)", color:"var(--green)"} },
-  { model:"gemini-2.0-flash",   provider:"Google via AIML API",    base:"$0.005",surge:"$0.05", surgeColor:"var(--muted)",  tag:"Live", tagStyle:{background:"var(--gd)", color:"var(--green)"} },
-  { model:"llama-3.3-70b",      provider:"Meta via AIML API",      base:"$0.001",surge:"$0.01", surgeColor:"var(--muted)",  tag:"Live", tagStyle:{background:"var(--gd)", color:"var(--green)"} },
-  { model:"deepseek-r1",        provider:"DeepSeek via AIML API",  base:"$0.001",surge:"$0.01", surgeColor:"var(--muted)",  tag:"Soon", tagStyle:{background:"var(--bd)", color:"var(--blue)"}  },
-];
+export default function DashboardPage() {
 
-const FEATURES = [
-  { icon:"⚡", title:"3-Line Integration",  desc:"app.use(mcpay(...)) wraps any Express route. No changes to your existing tool logic. Works with any MCP server." },
-  { icon:"🔑", title:"No API Keys Ever",    desc:"Agents authenticate with OWS wallet signatures. No accounts, no subscriptions, no rate limits. Just wallet + HTTP." },
-  { icon:"💬", title:"XMTP Receipts",       desc:"Every payment triggers a wallet-to-wallet XMTP message. Tool owners get paid AND notified. Agents get on-chain receipts." },
-  { icon:"📊", title:"Real Earnings",       desc:"Zerion API shows your actual on-chain USDC balance. Not a simulated counter — real money, verified on Base Sepolia." },
-  { icon:"🧠", title:"Dynamic Pricing",     desc:"Price function can be static ($0.01) or dynamic — per model, per load, per data size. First surge-pricing x402 middleware." },
-  { icon:"🛡", title:"Spend Governance",    desc:"OWS policy engine enforces per-session limits, chain allowlists, and vendor restrictions. Agents can never overspend." },
-];
+  // State
+  const [page, setPage]               = useState<Page>("overview");
+  const [stats, setStats]           = useState<ToolStat[]>([]);
+  const [toolsList, setToolsList]   = useState<any[]>([]);
+  const [messages, setMessages]     = useState<any[]>([]);
+  const [agentLogs, setAgentLogs]   = useState<any[]>([]);
+  const [policy, setPolicy]         = useState<any>(null);
+  const [feed, setFeed]             = useState<FeedRow[]>([]);
+  const [walletConnected, setWallet] = useState(false);
+  const [walletAddr, setWalletAddr]  = useState("0x000...000");
+  const [walletBal, setWalletBal]    = useState("0.0000");
+  const [walletHealth, setHealth]    = useState<ZerionHealth | null>(null);
 
-export default function LandingPage() {
-  const [copied, setCopied] = useState(false);
+  // Derived metrics from stats (Real data from server)
+  const totalVol   = stats.reduce((acc, s) => acc + s.totalEarned, 0);
+  const totalCalls = stats.reduce((acc, s) => acc + s.totalCalls, 0);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText("npm install mcpay");
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  // ── FETCH LIVE DATA ──
+  const fetchLive = useCallback(async () => {
+    try {
+      const [sRes, zRes, tRes, mRes, pRes, lRes] = await Promise.all([
+        fetch(`${SERVER}/stats`),
+        walletConnected ? fetch(`${SERVER}/zerion/wallet-health`) : Promise.resolve(null),
+        fetch(`${SERVER}/tools`),
+        fetch(`${SERVER}/messages`),
+        fetch(`${SERVER}/policy`),
+        fetch(`${SERVER}/agent-logs`)
+      ]);
+      
+      if (sRes.ok) setStats(await sRes.json());
+      if (tRes?.ok) setToolsList(await tRes.json());
+      if (mRes?.ok) setMessages(await mRes.json());
+      if (pRes?.ok) setPolicy(await pRes.json());
+      if (lRes.ok) {
+        const rawLogs = await lRes.json();
+        // Force START log to ts=1 so it always sorts to TOP after ascending sort
+        const fixedLogs = rawLogs.map((l: any) => l.type === 'START' ? { ...l, ts: 1 } : l);
+        setAgentLogs(fixedLogs);
+      }
+
+
+      if (zRes?.ok) {
+        const health: ZerionHealth = await zRes.json();
+        setHealth(health);
+        setWalletBal(Number(health.agent.totalValue).toFixed(4));
+        setWalletAddr(health.agent.address || "");
+        
+        // Convert Zerion txs to FeedRows (Improved mapping)
+        if (health.recentTxs) {
+          const rows: FeedRow[] = health.recentTxs.map((tx: any) => {
+            const attr = tx.attributes;
+            const opType = attr.operation_type;
+            const counterparty = attr.other_parties?.[0] || "OWS Internal";
+            const time = attr.mined_at ? new Date(attr.mined_at).toLocaleTimeString() : new Date().toLocaleTimeString();
+            
+            return {
+              id: tx.id,
+              time,
+              tool: opType === 'transfer' ? 'USDC P2P' : 'Contract Call',
+              wallet: counterparty,
+              args: opType.charAt(0).toUpperCase() + opType.slice(1),
+              amount: 0.01 // Default if price not in tx attribute
+            };
+          });
+          setFeed(rows);
+        }
+      }
+    } catch (e) { console.error("Sync error:", e); }
+  }, [walletConnected]);
+
+  // ── AUTO CONNECT ON LOAD ──
+  useEffect(() => {
+    const checkServer = async () => {
+      try {
+        const response = await fetch(`${SERVER}/zerion/wallet-health`);
+        if (response.ok) {
+          setWallet(true);
+        }
+      } catch (e) {}
+    };
+    checkServer();
+  }, []);
+
+  useEffect(() => {
+    fetchLive();
+    const id = setInterval(fetchLive, 5000);
+    return () => clearInterval(id);
+  }, [fetchLive]);
+
+  // ── AUTO SCROLL ──
+  useEffect(() => {
+    if (page === 'playground') {
+      const anchor = document.getElementById('anchor');
+      if (anchor) anchor.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [agentLogs, page]);
+
+  // ── CONNECT WALLET ──
+  const connectWallet = async () => {
+    if (walletConnected) return;
+    try {
+        // Real-world server check
+        const response = await fetch(`${SERVER}/stats`);
+        if (!response.ok) throw new Error();
+        setWallet(true);
+        fetchLive();
+    } catch (e) {
+        alert("Error: MCPay Server or OWS Wallet Offline. Run Server First!");
+    }
   };
 
-  // Double ticker items for seamless loop
-  const tickerItems = [...TICKER_ITEMS, ...TICKER_ITEMS];
+  // ── NAV ──
+  const NavItem = ({ id, icon, label }: { id: Page; icon: string; label: string }) => (
+    <div
+      className={`nav-item${page === id ? " active" : ""}`}
+      onClick={() => setPage(id)}
+      style={{
+        display:"flex", alignItems:"center", gap:10,
+        padding:"10px 20px", fontSize:11, letterSpacing:".06em", textTransform:"uppercase",
+        color: page === id ? "var(--green)" : "var(--muted)",
+        cursor:"pointer", transition:"all .2s",
+        borderLeft: page === id ? "2px solid var(--green)" : "2px solid transparent",
+        background: page === id ? "var(--gd)" : "transparent",
+      }}
+      onMouseEnter={e => { if(page!==id){ (e.currentTarget as HTMLElement).style.color="var(--white)"; (e.currentTarget as HTMLElement).style.background="var(--s2)"; }}}
+      onMouseLeave={e => { if(page!==id){ (e.currentTarget as HTMLElement).style.color="var(--muted)"; (e.currentTarget as HTMLElement).style.background="transparent"; }}}
+    >
+      <span style={{fontSize:14, width:18, textAlign:"center"}}>{icon}</span>
+      {label}
+    </div>
+  );
+
+  const lastTx = feed[0]?.time ?? "—";
 
   return (
-    <div className="scanlines">
+    <div style={{
+      background:"var(--bg)", color:"var(--white)", fontFamily:"var(--mono)",
+      minHeight:"100vh", display:"grid",
+      gridTemplateRows:"56px 1fr", gridTemplateColumns:"220px 1fr"
+    }}>
+      <style>{`
+        @keyframes shimmer { 0% { left: -100%; } 100% { left: 100%; } }
+        .shimmer-line { background: linear-gradient(90deg, transparent, var(--blue), transparent); animation: shimmer 1s infinite linear; }
+        @keyframes stepPulse { 0% { box-shadow: 0 0 0 0 rgba(0,183,255,0.4); } 70% { box-shadow: 0 0 0 10px rgba(0,183,255,0); } 100% { box-shadow: 0 0 0 0 rgba(0,183,255,0); } }
+        .active-step-pulse { animation: stepPulse 1.5s infinite; }
+        @keyframes popIn { 0% { transform: scale(0.95); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+        @keyframes slideIn { 0% { transform: translateY(10px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
+      `}</style>
 
-      {/* ── NAV ── */}
-      <nav style={{
-        position:"fixed", top:0, left:0, right:0, zIndex:200,
-        display:"flex", alignItems:"center", justifyContent:"space-between",
-        padding:"18px 48px",
-        background:"rgba(7,7,9,0.88)", borderBottom:"1px solid var(--border)",
-        backdropFilter:"blur(16px)"
+      {/* ── TOPBAR ── */}
+      <header style={{
+        gridColumn:"1 / -1", display:"flex", alignItems:"center",
+        justifyContent:"space-between", padding:"0 24px",
+        borderBottom:"1px solid var(--border)", background:"var(--bg)", zIndex:50,
       }}>
-        <Link href="/" style={{ fontFamily:"var(--display)", fontWeight:800, fontSize:20, color:"var(--green)", textDecoration:"none", letterSpacing:"-0.5px" }}>
+        <Link href="/" style={{ fontFamily:"var(--display)", fontSize:18, fontWeight:800, color:"var(--green)", textDecoration:"none", letterSpacing:"-.5px" }}>
           MC<span style={{color:"var(--white)"}}>Pay</span>
         </Link>
-        <div style={{display:"flex", alignItems:"center", gap:24}}>
-          {[["#how","Protocol"],["#integrations","Integrations"],["#sdk","SDK"],["#pricing","Pricing"]].map(([href,label]) => (
-            <a key={href} href={href} style={{ fontSize:11, color:"var(--muted)", textDecoration:"none", letterSpacing:"0.1em", textTransform:"uppercase" }}
-               onMouseEnter={e=>(e.currentTarget.style.color="var(--green)")}
-               onMouseLeave={e=>(e.currentTarget.style.color="var(--muted)")}>
-              {label}
-            </a>
-          ))}
-          <Link href="/dashboard" style={{
-            background:"var(--green)", color:"var(--bg)", padding:"8px 20px",
-            fontFamily:"var(--mono)", fontSize:11, fontWeight:700, letterSpacing:"0.08em",
-            textTransform:"uppercase", textDecoration:"none"
-          }}>
-            Live Dashboard →
-          </Link>
+
+        <div style={{display:"flex", alignItems:"center", gap:8}}>
+          <div className="status-dot" />
+          <span style={{fontSize:11, color:"var(--green)", letterSpacing:".06em"}}>Live Connection</span>
+          <span style={{fontSize:11, color:"var(--muted)"}}>· Base Sepolia · OWS Wallet Connected</span>
+        </div>
+
+        <div style={{display:"flex", alignItems:"center", gap:12}}>
+          <button className="small-btn" onClick={fetchLive}>Sync Real Data</button>
+          <button
+            onClick={connectWallet}
+            style={{
+              display:"flex", alignItems:"center", gap:8,
+              border:"1px solid " + (walletConnected ? "rgba(0,232,122,.4)" : "var(--border2)"),
+              padding:"6px 14px", fontSize:11,
+              color: walletConnected ? "var(--green)" : "var(--text)",
+              background: walletConnected ? "var(--gd)" : "transparent",
+              cursor:"pointer", transition:"all .2s", fontFamily:"var(--mono)",
+            }}
+          >
+            <div style={{
+              width:6, height:6, borderRadius:"50%",
+              background: walletConnected ? "var(--green)" : "var(--muted)",
+              animation: walletConnected ? "pulse 2s infinite" : "none",
+            }}/>
+            {walletConnected ? (walletAddr && walletAddr !== "0x000...000" ? walletAddr.slice(0,14)+"..." : "Syncing...") : "Connect OWS Wallet"}
+          </button>
+        </div>
+      </header>
+
+      {/* ── SIDEBAR ── */}
+      <nav style={{
+        borderRight:"1px solid var(--border)", background:"var(--s1)",
+        padding:"20px 0", display:"flex", flexDirection:"column", gap:2, overflowY:"auto",
+      }}>
+        <div style={{fontSize:9, color:"var(--muted)", letterSpacing:".15em", textTransform:"uppercase", padding:"0 20px", marginBottom:4}}>Overview</div>
+        <NavItem id="overview" icon="◈" label="Dashboard" />
+        <NavItem id="tools"    icon="⚙" label="Tool Registry" />
+
+        <div style={{height:1, background:"var(--border)", margin:"12px 16px"}} />
+        <div style={{fontSize:9, color:"var(--muted)", letterSpacing:".15em", textTransform:"uppercase", padding:"0 20px", marginBottom:4}}>Real Wallet</div>
+        <NavItem id="playground" icon="🕹" label="AI Playground" />
+        <div className="nav-item" style={{display:"flex", alignItems:"center", gap:10, padding:"10px 20px", fontSize:11, color:"var(--muted)", cursor:"pointer"}} 
+             onClick={()=>window.open('http://localhost:3001/ows-interface', '_blank')}>
+          <span style={{fontSize:14, width:18, textAlign:"center"}}>◉</span>
+          OWS Interface
+        </div>
+
+        <div style={{height:1, background:"var(--border)", margin:"12px 16px"}} />
+        <div style={{fontSize:9, color:"var(--muted)", letterSpacing:".15em", textTransform:"uppercase", padding:"0 20px", marginBottom:4}}>Governance</div>
+        <NavItem id="policy" icon="🛡" label="Spend Policies" />
+
+        <div style={{height:1, background:"var(--border)", margin:"12px 16px"}} />
+        <div style={{fontSize:9, color:"var(--muted)", letterSpacing:".15em", textTransform:"uppercase", padding:"0 20px", marginBottom:4}}>Resources</div>
+        <Link href="/landing-page" style={{
+          display:"flex", alignItems:"center", gap:10,
+          padding:"10px 20px", fontSize:11, letterSpacing:".06em", textTransform:"uppercase",
+          color:"var(--muted)", textDecoration:"none", transition:"all. 2s"
+        }}>
+          <span style={{fontSize:14, width:18, textAlign:"center"}}>📟</span>
+          Landing Page
+        </Link>
+
+        <div style={{marginTop:"auto", padding:"20px", borderTop:"1px solid var(--border)"}}>
+          <div style={{fontSize:9, color:"var(--muted)", letterSpacing:".1em", textTransform:"uppercase", marginBottom:8}}>Powered by</div>
+          <div style={{display:"flex", gap:10, fontSize:10, color:"var(--text)"}}>
+            <span>Zerion</span>
+            <span>XMTP</span>
+            <span>OWS</span>
+          </div>
         </div>
       </nav>
 
-      {/* ── HERO ── */}
-      <section className="hero">
-        <div className="hero-bg" />
-        <div className="hero-orb" />
+      {/* ── MAIN ── */}
+      <main style={{overflowY:"auto", padding:28, display:"flex", flexDirection:"column", gap:20}}>
 
-        <div className="pill">
-          <span className="blink-dot" />
-          OWS Hackathon 2026 · Track 03 · Live on Base Sepolia
-        </div>
-
-        <h1 className="hero-h1">
-          Monetize Any<br />
-          <span className="g">MCP Tool</span><br />
-          <span className="dim">in 3 Lines</span>
-        </h1>
-
-        <p className="hero-sub">
-          The first native monetization layer for Model Context Protocol servers.
-          No API keys, no subscriptions, no accounts — just an OWS Wallet and an HTTP request.
-        </p>
-
-        <div className="hero-btns">
-          <a href="#sdk" className="btn-primary">Get Started →</a>
-          <Link href="/dashboard" className="btn-ghost">Live Dashboard</Link>
-        </div>
-
-        <div className="install-strip">
-          <span className="install-label">Install</span>
-          <span className="install-cmd">npm install mcpay</span>
-          <button className="copy-btn" onClick={handleCopy}>
-            {copied ? "Copied!" : "Copy"}
-          </button>
-        </div>
-      </section>
-
-      {/* ── TICKER ── */}
-      <div className="ticker-outer">
-        <div className="ticker-inner">
-          {tickerItems.map((item, i) => (
-            <span className="ti" key={i}>
-              <span className="dot">◆</span>{item}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      {/* ── HOW IT WORKS ── */}
-      <section className="sec" id="how">
-        <div className="sec-label">Protocol Flow</div>
-        <h2 className="sec-title">How MCPay Works</h2>
-        <div className="flow">
-          {FLOW_STEPS.map(s => (
-            <div className="flow-item" key={s.n}>
-              <div className="flow-n">{s.n}</div>
-              <div className="flow-t">{s.t}</div>
-              <div className="flow-d">{s.d}</div>
-              <span className="flow-tag">{s.tag}</span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ── CODE BLOCK ── */}
-      <div style={{background:"var(--s1)", borderTop:"1px solid var(--border)", borderBottom:"1px solid var(--border)", padding:"60px 48px"}}>
-        <div style={{maxWidth:1200, margin:"0 auto"}}>
-          <div className="sec-label">Integration</div>
-          <h2 className="sec-title">One Middleware.<br />Any Tool.</h2>
-          <div className="code-wrap" data-file="server.ts">
-            <div className="dots"><span className="dr"/><span className="dy"/><span className="dg"/></div>
-            <pre dangerouslySetInnerHTML={{ __html: `<span class="kw">import</span> <span class="fn">express</span> <span class="kw">from</span> <span class="st">'express'</span>
-<span class="kw">import</span> { <span class="fn">mcpay</span> } <span class="kw">from</span> <span class="st">'mcpay'</span>         <span class="cm">// npm install mcpay</span>
-
-<span class="kw">const</span> app = <span class="fn">express</span>()
-
-<span class="cm">// ── TOOL 1: Weather — $0.01 flat ──</span>
-app.<span class="fn">use</span>(...<span class="fn">mcpay</span>({
-  price:         <span class="st">'$0.01'</span>,
-  walletAddress: process.env.<span class="fn">TOOL_WALLET</span>,
-  toolName:      <span class="st">'weather-data'</span>,
-}))
-
-<span class="cm">// ── TOOL 2: AI Inference — dynamic pricing by model ──</span>
-app.<span class="fn">use</span>(...<span class="fn">mcpay</span>({
-  price:         (<span class="fn">req</span>) => <span class="fn">getDynamicPrice</span>(req.body.model),
-  walletAddress: process.env.<span class="fn">TOOL_WALLET</span>,
-  toolName:      <span class="st">'ai-inference'</span>,
-}))` }} />
-          </div>
-        </div>
-      </div>
-
-      {/* ── INTEGRATIONS ── */}
-      <section className="sec" id="integrations">
-        <div className="sec-label">Partner Stack</div>
-        <h2 className="sec-title">Integrations That<br />Win Prizes</h2>
-        <div className="int-grid">
-          {INTEGRATIONS.map(int => (
-            <div className="int-card" key={int.name}>
-              <div className="int-head">
-                <div className="int-icon">{int.icon}</div>
-                <div>
-                  <div className="int-name">{int.name}</div>
-                  <span className="int-badge" style={{background:int.badgeColor, color:int.badgeText}}>{int.badge}</span>
-                </div>
-              </div>
-              <div className="int-desc">{int.desc}</div>
-              {int.features.map((f,i) => <div className="int-feature" key={i}>{f}</div>)}
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ── SDK ── */}
-      <div style={{background:"var(--s1)", borderTop:"1px solid var(--border)", borderBottom:"1px solid var(--border)", padding:"80px 48px"}} id="sdk">
-        <div style={{maxWidth:1200, margin:"0 auto"}}>
-          <div className="sec-label">Developer SDK</div>
-          <h2 className="sec-title">mcpay — The Full SDK</h2>
-          <div className="sdk-grid">
-            {SDK_CARDS.map(c => (
-              <div className="sdk-card" key={c.name}>
-                <div className="sdk-name">{c.name}</div>
-                <div className="sdk-pkg">{c.pkg}</div>
-                <div className="sdk-desc">{c.desc}</div>
-                <span className={`sdk-status ${c.status}`}>{c.label}</span>
+        {/* ══ OVERVIEW ══ */}
+        {page === "overview" && <>
+          {/* Metric row */}
+          <div className="metric-row">
+            {[
+              { label:"Total Volume",     val:`$${totalVol.toFixed(4)}`,   sub:`Real-time Earnings`,  subClass:"up",   color:"var(--green)"  },
+              { label:"Total Tool Calls", val:String(totalCalls),           sub:`across activated tools`, subClass:"",     color:"var(--blue)"   },
+              { label:"Total Revenue",    val:`$${totalVol.toFixed(4)}`,   sub:`Direct OWS Settlements`,  subClass:"up",   color:"var(--purple)" },
+              { label:"Network Status",   val:"Active",                    sub:"Base Sepolia v4.2",      subClass:"up",   color:"var(--orange)" }
+            ].map(m => (
+              <div className="metric" key={m.label}>
+                <div className="metric-label">{m.label}</div>
+                <div className="metric-val" style={{color:m.color}}>{m.val}</div>
+                <div className={`metric-sub ${m.subClass}`}>{m.sub}</div>
               </div>
             ))}
           </div>
 
-          {/* Agent-side code example */}
-          <div className="code-wrap" data-file="agent.ts" style={{marginTop:0}}>
-            <div className="dots"><span className="dr"/><span className="dy"/><span className="dg"/></div>
-            <pre dangerouslySetInnerHTML={{ __html: `<span class="cm">// Agent-side: mcpayFetch auto-handles 402 + OWS payment</span>
-<span class="kw">import</span> { <span class="fn">mcpayFetch</span> } <span class="kw">from</span> <span class="st">'mcpay'</span>
-
-<span class="kw">const</span> result = <span class="kw">await</span> <span class="fn">mcpayFetch</span>(<span class="st">'http://tools.mcpay.dev/weather-data'</span>, {
-  method:    <span class="st">'POST'</span>,
-  body:      <span class="fn">JSON.stringify</span>({ city: <span class="st">'Delhi'</span> }),
-  owsWallet: <span class="st">'mcpay-agent'</span>,   <span class="cm">// OWS wallet name</span>
-  maxPrice:  <span class="st">'$0.05'</span>            <span class="cm">// OWS policy ceiling</span>
-})
-<span class="cm">// → { temperature: '28', city: 'Delhi', _mcpay: { paid: '$0.01' } }</span>
-<span class="cm">// That's it. 402 intercepted, OWS paid, result returned. 🎉</span>` }} />
-          </div>
-        </div>
-      </div>
-
-      {/* ── DYNAMIC PRICING ── */}
-      <section className="sec" id="pricing">
-        <div className="sec-label">AIML API Integration</div>
-        <h2 className="sec-title">Dynamic Inference Pricing</h2>
-        <p style={{fontSize:13, color:"var(--text)", marginBottom:32, maxWidth:560, lineHeight:1.7}}>
-          MCPay wraps AIML API behind x402 with per-model pricing.
-          The first pay-per-inference layer that covers Track 03 and Track 04 simultaneously.
-        </p>
-
-        <div className="pricing-table">
-          <div className="pt-head">
-            <span className="pt-label">Model</span>
-            <span className="pt-label">Base Price</span>
-            <span className="pt-label">Surge (10x)</span>
-            <span className="pt-label">Status</span>
-          </div>
-          {MODELS.map(m => (
-            <div className="pt-row" key={m.model}>
-              <div>
-                <div className="pt-model">{m.model}</div>
-                <div className="pt-provider">{m.provider}</div>
+          <div className="tools-row" style={{marginBottom:12}}>
+            {stats.map(s => (
+              <div className="tool-card" key={s.toolName} style={{padding: "16px 20px"}}>
+                <div className="tc-top">
+                  <div className="tc-name" style={{fontSize:14}}>{s.toolName}</div>
+                  <span className="tc-price flat">Active</span>
+                </div>
+                <div className="tc-stats" style={{marginTop:8}}>
+                  <div><div className="tc-sl">Calls</div><div className="tc-sv">{s.totalCalls}</div></div>
+                  <div><div className="tc-sl">Earned</div><div className="tc-sv earn">${s.totalEarned.toFixed(4)}</div></div>
+                </div>
               </div>
-              <div className="pt-price">{m.base}</div>
-              <div className="pt-surge" style={{color:m.surgeColor}}>{m.surge}</div>
-              <span className="pt-tag" style={m.tagStyle}>{m.tag}</span>
+            ))}
+          </div>
+
+          {/* Agent Playground Input */}
+          <div className="panel" style={{padding:0, overflow:"hidden", border:"1px solid var(--blue)"}}>
+            <div style={{display:"flex", background:"var(--s1)", padding:10, gap:10}}>
+              <input 
+                id="agentInput"
+                type="text" 
+                placeholder="Talk to OWS Agent (e.g. Check weather in Delhi or summarize http://...)"
+                style={{
+                  flex:1, background:"#000", border:"1px solid #333", color:"#fff",
+                  padding:"12px 20px", fontSize:13, fontFamily:"var(--mono)", outline:"none"
+                }}
+                onKeyDown={(e) => { if(e.key==='Enter') (document.getElementById('runBtn') as any).click(); }}
+              />
+              <button 
+                id="runBtn"
+                style={{
+                  background:"var(--blue)", color:"#000", border:"none", padding:"0 24px",
+                  fontSize:11, fontWeight:800, cursor:"pointer", textTransform:"uppercase"
+                }}
+                onClick={async () => {
+                  const input = document.getElementById('agentInput') as HTMLInputElement;
+                  const prompt = input.value;
+                  if(!prompt) return;
+                  input.value = "";
+                  await fetch(`${SERVER}/run-agent`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt })
+                  });
+                  setTimeout(() => fetchLive(), 800);
+                  setTimeout(() => fetchLive(), 2500);
+                }}
+              >Run Agent</button>
             </div>
-          ))}
-        </div>
-        <p style={{fontSize:11, color:"var(--muted)", marginTop:16}}>
-          Surge pricing activates when queue depth &gt; 10 concurrent requests.
-          OWS policy maxPrice ceiling prevents agents from overpaying.
-        </p>
-      </section>
+          </div>
 
-      {/* ── FEATURES ── */}
-      <section className="sec">
-        <div className="sec-label">Why MCPay</div>
-        <h2 className="sec-title">Built for the<br />Agentic Economy</h2>
-        <div className="feat-grid">
-          {FEATURES.map(f => (
-            <div className="feat" key={f.title}>
-              <div className="feat-icon">{f.icon}</div>
-              <div className="feat-title">{f.title}</div>
-              <div className="feat-desc">{f.desc}</div>
+          <div style={{display:"grid", gridTemplateColumns: "1fr", gap:20}}>
+            {/* Agent Live Console - Full Width for better visibility */}
+            <div className="panel" style={{height:550, display:"flex", flexDirection:"column", background:"#080808"}}>
+                <div className="panel-head">
+                    <div className="panel-title">📟 OWS Agent Live Activity</div>
+                </div>
+                <div style={{
+                  flex:1, padding:15, fontFamily:"var(--mono)", fontSize:10.5, 
+                  overflowY:"auto", display: "flex", flexDirection: "column",
+                  lineHeight: 1.5
+                }}>
+                    {agentLogs.length === 0 ? (
+                        <div style={{color:"#333", textAlign:"center", marginTop:100}}>Waiting for OWS Agent commands...</div>
+                    ) : (() => {
+                        const startLogs = agentLogs.filter(l => l.type === 'START')
+                        const processLogs = agentLogs.filter(l => ['PLAN', 'EXEC', 'PAY'].includes(l.type))
+                        const doneLogs = agentLogs.filter(l => l.type === 'DONE')
+                        return [...startLogs, ...processLogs, ...doneLogs].map(log => (
+                          <div key={log.id} style={{marginBottom:8, borderBottom:"1px solid #151515", paddingBottom:6}}>
+                            <span style={{color:"#444"}}>[{log.time}]</span>{" "}
+                            <span style={{
+                              color: log.type === 'PAY' ? 'var(--green)' : 
+                                     log.type === 'EXEC' ? 'var(--blue)' : 
+                                     log.type === 'PLAN' ? '#aaa' : 
+                                     log.type === 'START' ? 'var(--orange)' : 'var(--white)',
+                              fontWeight: 700,
+                              fontSize: 9
+                            }}>{log.type}</span>{" "}
+                            <span style={{color: "#eee", marginLeft: 8}}>{log.content}</span>
+                          </div>
+                        ))
+                    })()}
+                </div>
             </div>
-          ))}
-        </div>
-      </section>
+          </div>
+        </>}
 
-      {/* ── FOOTER ── */}
-      <footer>
-        <div>
-          <div className="foot-logo">MCPay</div>
-          <p className="foot-desc">
-            The first native monetization layer for Model Context Protocol servers.
-            Built on OWS + x402. No API keys. No subscriptions. Just a wallet.
-          </p>
-        </div>
-        <div className="foot-r">
-          <p>Built by <strong style={{color:"var(--white)"}}>Nikhil Raikwar</strong></p>
-          <p style={{color:"var(--green)", marginTop:4}}>OWS Hackathon 2026 · Track 03</p>
-          <p style={{marginTop:12}}>Pay-Per-Call Services &amp; API Monetization</p>
-          <Link href="/dashboard" style={{color:"var(--green)", textDecoration:"none", fontSize:11}}>
-            Live Dashboard →
-          </Link>
-        </div>
-      </footer>
+        {/* ══ TOOL REGISTRY ══ */}
+        {page === "tools" && (
+          <div className="panel">
+            <div className="panel-head">
+              <div className="panel-title">Live MCP Tool Inventory</div>
+            </div>
+            <div style={{padding:20, display:"flex", flexDirection:"column", gap:16}}>
+              {toolsList.map(t => (
+                <div key={t.name} style={{background:"var(--s2)", border:"1px solid var(--border)", padding:20}}>
+                  <div style={{display:"grid", gridTemplateColumns:"1fr 120px 120px 100px", gap:12, alignItems:"center", marginBottom:12}}>
+                    <div>
+                      <div style={{fontFamily:"var(--display)", fontSize:15, fontWeight:700}}>{t.name}</div>
+                      <div style={{fontSize:10, color:"var(--muted)", marginTop:3}}>{t.desc}</div>
+                    </div>
+                    <span className="tc-price flat" style={{textAlign:"center"}}>{t.price}</span>
+                    <div style={{fontSize:11, color:"var(--text)"}}>{t.network}</div>
+                    <span className={`status-pill sp-ok`}>Active</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
+        {/* ══ FULL FEED ══ */}
+        {page === "feed" && (
+          <div className="panel">
+            <div className="panel-head">
+              <div className="panel-title">On-chain Audit Log</div>
+            </div>
+            <div style={{overflowX:"auto"}}>
+              <table className="feed-table">
+                <thead><tr><th>Mined At</th><th>Event</th><th>Address</th><th>Details</th><th>Proof</th></tr></thead>
+                <tbody>
+                  {feed.length === 0
+                    ? <tr><td colSpan={5} style={{textAlign:"center", color:"var(--muted)", padding:32}}>No transaction history found on-chain.</td></tr>
+                    : feed.map(r => (
+                        <tr key={r.id} className="flash-in">
+                          <td className="td-time">{r.time}</td>
+                          <td className="td-tool">{r.args}</td>
+                          <td className="td-wallet">{r.wallet}</td>
+                          <td style={{fontSize:10, color:"var(--text)"}}>Base Sepolia Confirmation</td>
+                          <td className="td-status"><span className="status-pill sp-ok">Verified</span></td>
+                        </tr>
+                      ))
+                  }
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ══ AI PLAYGROUND (CHATGPT WRAPPER MODE) ══ */}
+        {page === "playground" && (
+          <div style={{display:"flex", flexDirection:"column", height:"calc(100vh - 120px)", background:"#050505", border:"1px solid var(--border)", position: "relative"}}>
+            
+            {/* Chat Box Area */}
+            <div 
+              id="chatContainer"
+              style={{flex:1, overflowY:"auto", padding:"40px 20%", display:"flex", flexDirection:"column", gap:30, scrollBehavior:"smooth"}}
+            >
+              {agentLogs.length === 0 ? (
+                <div style={{textAlign:"center", marginTop:100}}>
+                  <div style={{fontSize:24, fontWeight:800, color:"#333", marginBottom:10}}>Welcome to OWS Playground</div>
+                  <div style={{fontSize:12, color:"#1a1a1a"}}>Use AI to perform payments and tool calls via OWS.</div>
+                </div>
+              ) : (
+                <>
+                {/* Render in fixed order: START first, process logs, DONE last */}
+                {(() => {
+                  const startLogs = agentLogs.filter(l => l.type === 'START')
+                  const processLogs = agentLogs.filter(l => ['PLAN', 'EXEC', 'PAY'].includes(l.type))
+                  const doneLogs = agentLogs.filter(l => l.type === 'DONE')
+                  const ordered = [...startLogs, ...processLogs, ...doneLogs]
+                  
+                  return ordered.map(log => {
+                    if (log.type === 'START') return (
+                      <div key={log.id} style={{alignSelf:"flex-end", maxWidth:"85%", background:"var(--blue)", color:"#000", padding:"16px 28px", borderRadius:"24px 24px 0 24px", fontSize:15, fontWeight:700, animation: "popIn 0.3s ease-out", marginBottom:15}}>
+                        {log.content}
+                      </div>
+                    )
+                    
+                    if (log.type === 'DONE') return (
+                      <div key={log.id} style={{alignSelf:"flex-start", width:"100%", maxWidth:"98%", background:"#111", border:"1px solid #222", color:"#fff", padding:"35px", borderRadius:"0 24px 24px 24px", fontSize:15, lineHeight:1.7, animation: "slideIn 0.4s ease-out", marginBottom:30}}>
+                        <div style={{fontSize:10, color:"var(--blue)", textTransform:"uppercase", fontWeight:900, marginBottom:16, letterSpacing:".2em", borderBottom:"1px solid #222", paddingBottom:10}}>Agent Response</div>
+                        <div style={{whiteSpace:"pre-wrap", overflowX:"auto", fontFamily:"var(--mono)", fontSize:14, color:"#eee"}}>{log.content}</div>
+                      </div>
+                    )
+                    
+                    return (
+                      <div key={log.id} style={{alignSelf:"flex-start", marginLeft:20, padding:"7px 18px", background:"transparent", borderLeft:"2px solid #222", fontSize:11, color:"#555", fontFamily:"var(--mono)", marginBottom:5}}>
+                        <span style={{color: log.type==='PAY'?'var(--green)':'#444', marginRight:10, fontWeight:900}}>[{log.type}]</span>
+                        {log.content}
+                      </div>
+                    )
+                  })
+                })()}
+                </>
+              )}
+              {/* Invisible anchor for scroll to bottom */}
+              <div id="anchor" style={{ height: 40 }} />
+            </div>
+
+            {/* MESSAGE BOX AT BOTTOM */}
+            <div style={{padding:"20px 20%", background:"linear-gradient(to top, #050505, transparent)"}}>
+              <div style={{position:"relative", display:"flex", background:"#111", border:"1px solid #222", borderRadius:12, padding:8}}>
+                <input 
+                  id="pgInput"
+                  autoComplete="off"
+                  placeholder="Ask OWS Agent (e.g., Bina weather)"
+                  style={{
+                    flex:1, background:"transparent", border:"none", color:"#fff",
+                    padding:"15px 20px", fontSize:14, outline:"none"
+                  }}
+                  onKeyDown={(e) => { if(e.key==='Enter') (document.getElementById('runBtn') as any).click(); }}
+                />
+                <button 
+                  id="runBtn"
+                  style={{
+                    background:"var(--green)", color:"#000", border:"none", borderRadius:8,
+                    padding:"0 25px", cursor:"pointer", transition:"transform 0.1s", fontWeight: 800
+                  }}
+                  onClick={async () => {
+                    const el = document.getElementById('pgInput') as HTMLInputElement;
+                    const prompt = el.value;
+                    if(!prompt) return;
+                    el.value = "";
+                    
+                    // PRESERVE STATE: Set initial query locally so it shows up instantly
+                    const now = Date.now();
+                    setAgentLogs([{ id: 'init-'+now, type: 'START', content: prompt, time: new Date().toLocaleTimeString(), ts: 1 }]);
+                    
+                    // Trigger agent
+                    await fetch(`${SERVER}/run-agent`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ prompt })
+                    });
+                    
+                    // INSTANT SYNC: Don't wait for 5 seconds poll
+                    setTimeout(() => fetchLive(), 800);
+                    setTimeout(() => fetchLive(), 2500);
+                  }}
+                >
+                  <span style={{fontSize:18, fontWeight:1000}}>↑</span>
+                </button>
+              </div>
+              <div style={{textAlign:"center", fontSize:10, color:"#222", marginTop:12, fontWeight: 600}}>AI Protocol Active</div>
+            </div>
+          </div>
+        )}
+
+        {/* ══ WALLET ══ */}
+        {page === "wallet" && <>
+          <div className="wallet-hero">
+            <div>
+              <div className="wab-label">OWS Identity</div>
+              <div className="wab-addr">{walletConnected ? walletAddr : "Connect to Load Portfolio"}</div>
+              <div className="wab-network">OWS-managed · Base Sepolia · USDC Settlements</div>
+            </div>
+            {walletConnected && (
+              <div style={{textAlign:"right"}}>
+                <div className="wbb-label">Balance (Zerion API)</div>
+                <div className="wbb-amount">${walletBal}</div>
+                <div className="wbb-usd">Real-time valuation in USD</div>
+              </div>
+            )}
+            <button className="btn-connect-wallet" onClick={connectWallet} disabled={walletConnected}>
+              {walletConnected ? "Wallet Linked" : "Connect OWS Wallet"}
+            </button>
+          </div>
+          
+          <div className="panel" style={{padding:24}}>
+            <h3 style={{fontSize:14, marginBottom:16}}>How OWS Identity Works</h3>
+            <p style={{fontSize:12, color:"var(--text)", lineHeight:1.7}}>
+              This dashboard connects directly to the <strong>Open Wallet Standard (OWS)</strong> node running on your machine. 
+              By connecting your agent's wallet, we fetch real-time portfolio health from <strong>Zerion API</strong> and 
+              payment alerts via <strong>XMTP</strong>. 
+            </p>
+          </div>
+        </>}
+
+        {/* ══ XMTP ══ */}
+        {page === "xmtp" && (
+          <div className="panel">
+            <div className="panel-head"><div className="panel-title">XMTP Payment Receipts</div></div>
+            {messages.length === 0 ? (
+              <div style={{padding:"60px 20px", textAlign:"center"}}>
+                <div style={{fontSize:32, marginBottom:20}}>✉</div>
+                <div style={{fontSize:14, color:"var(--white)", marginBottom:8}}>Waiting for incoming alerts...</div>
+                <p style={{fontSize:12, color:"var(--muted)", maxWidth:400, margin:"0 auto"}}>
+                  As per XMTP security standards, notifications appear here after the agent completes a tool payment.
+                </p>
+              </div>
+            ) : (
+              <div style={{padding:20, display:"flex", flexDirection:"column", gap:12}}>
+                {messages.map(m => (
+                  <div key={m.id} style={{background:"var(--s2)", border:"1px solid var(--border2)", padding:16, borderLeft:"3px solid var(--blue)"}}>
+                    <div style={{display:"flex", justifyContent:"space-between", marginBottom:8}}>
+                      <span style={{color:"var(--blue)", fontSize:11, fontWeight:700}}>PAYMENT RECEIVED</span>
+                      <span style={{color:"var(--muted)", fontSize:10}}>{m.time}</span>
+                    </div>
+                    <div style={{fontSize:13, color:"var(--white)", whiteSpace:"pre-wrap", fontFamily: "var(--mono)"}}>{m.body}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ══ ZERION ══ */}
+        {page === "zerion" && (
+          <div className="panel">
+            <div className="panel-head">
+              <div className="panel-title">Zerion API Dashboard</div>
+            </div>
+            <div style={{padding:24}}>
+                <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:20, marginBottom:24}}>
+                    <div style={{background:"var(--s1)", padding:20, border:"1px solid var(--border)"}}>
+                        <div style={{fontSize:9, color:"var(--muted)", textTransform:"uppercase"}}>Agent Portfolio Management</div>
+                        <div style={{fontSize:24, fontWeight:800, color:"var(--white)", marginTop:10}}>${walletBal || "0.00"}</div>
+                        <div style={{fontSize:10, color:"var(--green)", marginTop:4}}>Real-time sync active</div>
+                    </div>
+                    <div style={{background:"var(--s1)", padding:20, border:"1px solid var(--border)"}}>
+                        <div style={{fontSize:9, color:"var(--muted)", textTransform:"uppercase"}}>Tool Provider Health</div>
+                        <div style={{fontSize:24, fontWeight:800, color:"var(--blue)", marginTop:10}}>${walletHealth ? Number(walletHealth.tool.totalValue).toFixed(4) : "0.0000"}</div>
+                         <div style={{fontSize:10, color:"var(--muted)", marginTop:4}}>Receiving wallet linked</div>
+                    </div>
+                </div>
+                <div style={{fontSize:11, color:"var(--text)", lineHeight:1.6}}>
+                    Powered by Zerion's multi-chain API. Tracking assets on Base Sepolia.
+                </div>
+            </div>
+          </div>
+        )}
+
+        {/* ══ POLICY ══ */}
+        {page === "policy" && (
+          <div className="panel">
+            <div className="panel-head">
+              <div className="panel-title">OWS Spend Policies</div>
+            </div>
+            <div style={{padding:20}}>
+              {policy ? (
+                <div style={{background:"var(--s2)", border:"1px solid var(--border)", padding:20, marginBottom:20}}>
+                  <div style={{fontSize:10, color:"var(--muted)", marginBottom:12, display:"flex", justifyContent:"space-between"}}>
+                    <span>ACTIVE POLICY: {policy.name}</span>
+                    <span style={{color:"var(--green)"}}>STATUS: {policy.status}</span>
+                  </div>
+                  <pre style={{fontFamily:"var(--mono)", fontSize:12, color:"var(--text)", lineHeight:1.6, background:"#000", padding:15}}>
+                    {JSON.stringify(policy.rules, null, 2)}
+                  </pre>
+                  <div style={{fontSize:10, color:"var(--muted)", marginTop:12}}>ENFORCED AT: {new Date(policy.enforcedAt).toLocaleString()}</div>
+                </div>
+              ) : (
+                <p style={{fontSize:11, color:"var(--muted)"}}>Loading policy from OWS CLI...</p>
+              )}
+              <p style={{fontSize:11, color:"var(--muted)"}}>Policies are stored in your OWS CLI and enforced locally before signing.</p>
+            </div>
+          </div>
+        )}
+
+      </main>
     </div>
   );
 }

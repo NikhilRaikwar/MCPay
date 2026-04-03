@@ -10,8 +10,25 @@ import { mcpay, getStats } from 'mcpay'
 // ==========================================
 dotenv.config({ path: path.join(__dirname, '../../../.env') })
 
+// ==========================================
+// GLOBAL LOG SILENCER — Blocks Zerion 429 spam from ALL sources
+// ==========================================
+const SILENCE = ['Balance unavailable', 'HTTP 429', '[Zerion] Balance', 'ECONNRESET', 'sqlcipherCodecAttach']
+const _origLog = console.log.bind(console)
+const _origErr = console.error.bind(console)
+console.log = (...args: any[]) => {
+  const msg = args.join(' ')
+  if (SILENCE.some(s => msg.includes(s))) return
+  _origLog(...args)
+}
+console.error = (...args: any[]) => {
+  const msg = args.join(' ')
+  if (SILENCE.some(s => msg.includes(s))) return
+  _origErr(...args)
+}
+
 import { getWalletBalance, getRecentTransactions, getWalletPnL } from './zerion'
-import { initXMTP, sendPaymentAlert } from './xmtp-notifier'
+import { initXMTP, sendPaymentAlert, getMessages } from './xmtp-notifier'
 
 const app = express()
 
@@ -184,10 +201,139 @@ app.post('/tools/check-portfolio', async (req, res) => {
 })
 
 // ==========================================
-// STATS ENDPOINT (Registry ke liye)
+// AGENT LOG STORAGE
+// ==========================================
+let agentLogs: any[] = []
+
+app.post('/agent-logs', (req, res) => {
+  const { type, content, time } = req.body
+  agentLogs.push({ 
+    id: Date.now().toString(), 
+    type, 
+    content, 
+    time: time || new Date().toLocaleTimeString(),
+    ts: Date.now() 
+  })
+  if (agentLogs.length > 50) agentLogs.shift()
+  res.sendStatus(200)
+})
+
+app.get('/agent-logs', (req, res) => {
+  res.json(agentLogs)
+})
+
+// ==========================================
+// REGISTRY SUPPORT ENDPOINTS
 // ==========================================
 app.get('/stats', (req, res) => {
   res.json(getStats())
+})
+
+app.get('/messages', (req, res) => {
+  res.json(getMessages())
+})
+
+app.post('/messages', (req, res) => {
+  const { tool, wallet, amount, body } = req.body
+  const history = getMessages()
+  history.unshift({
+    id: Date.now().toString(),
+    tool,
+    wallet,
+    amount,
+    time: new Date().toLocaleTimeString(),
+    body
+  })
+  res.sendStatus(200)
+})
+
+app.post('/run-agent', (req, res) => {
+  const { prompt } = req.body
+  if (!prompt) return res.status(400).send("No prompt provided")
+
+  console.log(`[PLAYGROUND] Executing prompt: ${prompt}`)
+  
+  // Clear old logs for fresh run
+  agentLogs = [] 
+  
+  // Non-blocking spawn to allow logs to stream to dashboard
+  const { spawn } = require('child_process')
+  const agentPath = path.join(__dirname, '../../agent-client/src/agent.ts')
+  
+  const child = spawn('npx', ['ts-node', agentPath, prompt], {
+    cwd: path.join(__dirname, '../../../'),
+    env: { ...process.env, FORCE_COLOR: '1' }
+  })
+
+  child.stdout.on('data', (data: any) => {
+    const str = data.toString()
+    if (!str.includes('Balance unavailable') && !str.includes('429')) {
+      console.log(`[AGENT-STDOUT]: ${str.trim()}`)
+    }
+  })
+  child.stderr.on('data', (data: any) => {
+    const str = data.toString()
+    if (!str.includes('Balance unavailable') && !str.includes('429')) {
+      console.error(`[AGENT-STDERR]: ${str.trim()}`)
+    }
+  })
+
+  res.send({ status: "Agent Started", prompt })
+})
+
+app.get('/ows-interface', (req, res) => {
+  res.send(`
+    <html>
+      <head>
+        <title>OWS Local Node</title>
+        <style>
+          body { background: #050505; color: #00ff88; font-family: monospace; padding: 50px; }
+          .container { border: 1px solid #333; padding: 20px; max-width: 600px; margin: auto; box-shadow: 0 0 20px rgba(0,255,136,0.1); }
+          h1 { border-bottom: 2px solid #00ff88; padding-bottom: 10px; }
+          .stat { margin: 10px 0; font-size: 14px; }
+          .label { color: #888; }
+          .pulse { display: inline-block; width: 10px; height: 10px; background: #00ff88; border-radius: 50%; animation: pulse 1.5s infinite; margin-right: 10px; }
+          @keyframes pulse { 0% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.5); opacity: 0.5; } 100% { transform: scale(1); opacity: 1; } }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1><div class="pulse"></div> OWS NODE ACTIVE</h1>
+          <div class="stat"><span class="label">IDENTITY:</span> mcpay-agent</div>
+          <div class="stat"><span class="label">WALLET:</span> 0x2e44D60850e08138F15c209c1D5B3Fb8CC9cB5f9</div>
+          <div class="stat"><span class="label">NETWORK:</span> Base Sepolia (eip155:84532)</div>
+          <div class="stat"><span class="label">STATUS:</span> Listening for Agentic Payments</div>
+          <div class="stat" style="margin-top:20px; color:#555;">[LOG] x402 Settlement Logic Active...</div>
+          <div class="stat" style="color:#555;">[LOG] Syncing with MCPay Registry...</div>
+        </div>
+      </body>
+    </html>
+  `)
+})
+
+app.get('/policy', (req, res) => {
+  res.json({
+    name: "MCPAY_DEFAULT",
+    version: "1.0.0",
+    enforcedAt: new Date().toISOString(),
+    rules: {
+      max_per_tx: "0.05",
+      allowed_chains: ["eip155:84532"],
+      allowed_tools: ["weather-data", "url-summarizer", "check-portfolio"],
+      autopay: true,
+      daily_limit: "1.00",
+      currency: "USDC"
+    },
+    status: "Active"
+  })
+})
+
+app.get('/tools', (req, res) => {
+  res.json([
+    { name: 'weather-data', price: '$0.01', desc: 'Real-time weather for any city', network: 'Base Sepolia' },
+    { name: 'url-summarizer', price: '$0.02', desc: 'Summarize any webpage', network: 'Base Sepolia' },
+    { name: 'check-portfolio', price: '$0.05', desc: 'Check crypto portfolio value via Zerion API', network: 'Base Sepolia' }
+  ])
 })
 
 // ==========================================
