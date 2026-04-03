@@ -1,0 +1,18 @@
+{
+  "name": "mcpay-monorepo",
+  "version": "1.0.0",
+  "description": "Monetization layer for MCP tools using OWS and x402",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "dev": "npm run dev --workspaces",
+    "agent": "npm run start --workspace=agent-client"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "ts-node": "^10.9.1"
+  }
+}
