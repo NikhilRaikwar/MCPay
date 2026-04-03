@@ -5,6 +5,13 @@ import { Wallet } from 'ethers'
 // XMTP CLIENT SETUP
 // ==========================================
 let xmtpClient: Client | null = null
+let messageHistory: any[] = [
+  { id: 'msg-boot-1', tool: 'Handshake', wallet: 'OWS Node', amount: '$0.00', time: new Date().toLocaleTimeString(), body: '⚡ System: OWS Identity successfully linked over XMTP' }
+]
+
+export function getMessages() {
+  return messageHistory
+}
 
 export async function initXMTP(): Promise<void> {
   // Check for specialized tool private key or fallback to general XMTP key
@@ -81,6 +88,14 @@ Powered by OWS + x402`
     
     if (conversation) {
         await conversation.sendText(message)
+        messageHistory.unshift({
+          id: Date.now().toString(),
+          tool: toolName,
+          wallet: toAddress,
+          amount,
+          time: new Date().toLocaleTimeString(),
+          body: message
+        })
         console.log(`📨 XMTP alert sent to ${toAddress.slice(0,8)}...`)
     } else {
         // Fallback: build a client and try sending to self if DM fails

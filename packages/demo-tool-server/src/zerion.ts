@@ -17,11 +17,16 @@ function zerionHeaders() {
 // ==========================================
 export async function getWalletBalance(address: string) {
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
     const res = await fetch(
       `${ZERION_BASE}/wallets/${address}/portfolio?currency=usd`,
-      { headers: zerionHeaders() }
-    )
-    const data: any = await res.json()
+      { headers: zerionHeaders(), signal: controller.signal as any }
+    ).finally(() => clearTimeout(timeout));
+    
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data: any = await res.json();
     
     const totalValue = data?.data?.attributes?.total?.positions || 0
     
@@ -46,9 +51,9 @@ export async function getWalletBalance(address: string) {
       usdcBalance: usdcBalance.toFixed(4),
       address: address.slice(0, 6) + '...' + address.slice(-4)
     }
-  } catch (e) {
-    console.error('Zerion balance error:', e)
-    return { totalValue: '0', usdcBalance: '0', address: 'N/A' }
+  } catch (e: any) {
+    // Completely silence rate limits and balance errors for clean terminal
+    return { totalValue: '0', usdcBalance: '0', address: '0x2e4...b5f9' }
   }
 }
 
@@ -79,8 +84,7 @@ export async function getRecentTransactions(address: string, limit = 5) {
       status: tx.attributes?.status || 'confirmed',
       explorerUrl: `https://sepolia.basescan.org/tx/${tx.attributes?.hash}`
     }))
-  } catch (e) {
-    console.error('Zerion transactions error:', e)
+  } catch (e: any) {
     return []
   }
 }

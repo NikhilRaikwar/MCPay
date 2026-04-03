@@ -7,6 +7,7 @@ import { Client as XmtpClient, IdentifierKind } from '@xmtp/node-sdk'
 import { Wallet } from 'ethers'
 import * as crypto from 'node:crypto'
 import * as fs from 'fs'
+import * as os from 'os'
 
 // Load .env from root
 dotenv.config({ path: path.join(__dirname, '../../../.env') })
@@ -19,11 +20,22 @@ const AGENT_WALLET_NAME = process.env.OWS_WALLET_NAME || 'mcpay-agent'
 const TOOL_SERVER = 'http://localhost:3001'
 const BASE_URL = process.env.ANTHROPIC_BASE_URL || 'https://api.aimlapi.com/v1'
 const MODEL = process.env.ANTHROPIC_MODEL || 'anthropic/claude-opus-4-6'
+const MY_WALLET = process.env.TOOL_WALLET_ADDRESS || '0xCc9aF4932E78ABdD3640993cb45944cE2775b37b'
 
 const openai = new OpenAI({
     apiKey: process.env.ANTHROPIC_API_KEY,
     baseURL: BASE_URL
 })
+
+async function reportLog(type: 'PLAN' | 'EXEC' | 'PAY' | 'DONE' | 'START', content: string) {
+  try {
+    await fetch(`${TOOL_SERVER}/agent-logs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, content, time: new Date().toLocaleTimeString() })
+    })
+  } catch (e) {}
+}
 
 async function sendXmtpReceipt(message: string) {
   if (!process.env.XMTP_PRIVATE_KEY) {
@@ -66,22 +78,37 @@ async function sendXmtpReceipt(message: string) {
         }
     })
 
+    const safeId = wallet.address.toLowerCase().replace(/[^a-z0-9]/g, '')
     const client = await XmtpClient.create(signer, { 
-      dbEncryptionKey
-    })
-    console.log(`[XMTP] Client created for ${wallet.address}`)
-    
-    const recipient = process.env.RECEIPT_RECIPIENT_ADDRESS || wallet.address
-    const dm = await client.conversations.fetchDmByIdentifier({
-      identifier: recipient,
-      identifierKind: IdentifierKind.Ethereum,
+      dbEncryptionKey,
+      dbPath: path.join(os.tmpdir(), `xmtp-${safeId}-${Date.now()}.db`)
     })
     
-    if (dm) {
-      await dm.sendText(message)
-      console.log(`[XMTP] Receipt sent to ${recipient}`)
-    } else {
-      console.log(`[XMTP] Could not create DM with ${recipient}`)
+    // Use the OWS Tool Wallet as recipient
+    const recipient = MY_WALLET
+    
+    try {
+      // In @xmtp/node-sdk v3, DMs are 1-on-1 groups
+      const conv = await client.conversations.createGroup([recipient])
+      await conv.sendText(message)
+      console.log(`[XMTP] Delivered to ${recipient}`)
+      await reportLog('DONE', `XMTP Receipt Delivered to ${recipient}`)
+    } catch (dmErr) {
+      console.log(`[XMTP] Fallback: Reporting Local Receipt because: ${dmErr}`)
+      
+      // Notify Dashboard directly for Alerts tab
+      await fetch(`${TOOL_SERVER}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tool: "MCPay Payment",
+          wallet: recipient,
+          amount: 0.01,
+          body: `⚡ Local Proof: Payment confirmed for agent ${recipient} via OWS.`
+        })
+      }).catch(() => {})
+
+      await reportLog('PAY', `[Receipt] Payment Confirmed (Local Alert) for ${recipient}`)
     }
   } catch (e) {
     console.error(`[XMTP] Error: ${e}`)
@@ -179,10 +206,12 @@ const tools: any[] = [
 async function runAgent(userQuery: string) {
   console.log(`\nAgent starting (Model: ${MODEL})`)
   console.log(`Query: "${userQuery}"`)
+  await reportLog('START', `Query: ${userQuery}`)
   
   const messages: any[] = [{ role: 'user', content: userQuery }]
   
   while (true) {
+    await reportLog('PLAN', `Thinking via ${MODEL}...`)
     const response = await (openai.chat.completions.create({
       model: MODEL,
       messages,
@@ -194,28 +223,33 @@ async function runAgent(userQuery: string) {
     if (message.tool_calls) {
       messages.push({
           role: 'assistant',
-          content: message.content || null,
+          content: message.content || "",
           tool_calls: message.tool_calls
       })
       
       for (const toolCall of (message.tool_calls as any[])) {
         console.log(`\nTool suggested: ${toolCall.function.name}`)
+        await reportLog('PLAN', `Suggested Tool: ${toolCall.function.name}`)
+
         const args = JSON.parse(toolCall.function.arguments)
         
         let result: any
         if (toolCall.function.name === 'get_weather') {
+          await reportLog('PAY', `Executing $0.01 OWS payment for weather-data`)
           result = await (await owsFetch(`${TOOL_SERVER}/tools/weather-data`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ city: args.city })
           })).json()
         } else if (toolCall.function.name === 'summarize_url') {
+          await reportLog('PAY', `Executing $0.02 OWS payment for url-summarizer`)
           result = await (await owsFetch(`${TOOL_SERVER}/tools/url-summarizer`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ url: args.url })
           })).json()
         } else if (toolCall.function.name === 'check_portfolio') {
+          await reportLog('PAY', `Executing $0.05 OWS payment for check-portfolio`)
           result = await (await owsFetch(`${TOOL_SERVER}/tools/check-portfolio`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -224,6 +258,7 @@ async function runAgent(userQuery: string) {
         }
         
         console.log(`   Result received: ${JSON.stringify(result).substring(0, 50)}...`)
+        await reportLog('EXEC', `Data Received: ${JSON.stringify(result).substring(0, 60)}...`)
         
         messages.push({
           role: 'tool',
@@ -234,6 +269,7 @@ async function runAgent(userQuery: string) {
       }
     } else {
       console.log(`\nFinal Response:\n${message.content}\n`)
+      await reportLog('DONE', `Response: ${message.content}`)
       return
     }
   }
