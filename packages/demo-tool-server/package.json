@@ -4,6 +4,7 @@
   "description": "Example paid MCP tool server",
   "main": "dist/server.js",
   "scripts": {
+    "dev": "ts-node src/server.ts",
     "start": "ts-node src/server.ts",
     "build": "tsc"
   },
