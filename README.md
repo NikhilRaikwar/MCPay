@@ -10,6 +10,40 @@ Model Context Protocol (MCP) servers are the glue of the AI economy, but they la
 
 No API keys, no subscriptions, no accounts. Just an **OWS Wallet** and an autonomous agent economy.
 
+## 🏗 Architecture & OWS Integration
+
+```mermaid
+graph TD
+    subgraph "🤖 The Autonomous Economy"
+    A["👤 User Query"] -->|What is the weather?| B["🤖 Claude Agent <br/>(agent-client)"]
+    B -->|Tool Request| C["🔧 MCPay Middleware <br/>(x402 Interceptor)"]
+    end
+
+    subgraph "💸 OWS Payment Rails"
+    C -->|402 Payment Required| D["🔑 OWS CLI <br/>(Wallet Engine)"]
+    D -->|Sign & Broadcast| E["🏦 Base Sepolia <br/>(USDC Settlement)"]
+    E -->|Proof of Payment| C
+    end
+
+    subgraph "📦 The Service Provider"
+    C -->|Execute Tool| F["📡 Demo Tool Server"]
+    F -->|Result| C
+    C -->|Final Answer| B
+    end
+
+    classDef agent fill:#0088ff,stroke:#0055aa,color:#fff;
+    classDef ows fill:#ff8800,stroke:#aa5500,color:#fff;
+    classDef blockchain fill:#00ff88,stroke:#00aa55,color:#000;
+    classDef server fill:#111,stroke:#00ff88,color:#fff;
+
+    class B agent;
+    class D,C ows;
+    class E blockchain;
+    class F server;
+```
+
+---
+
 ## 🛠 Features
 - **Plug-and-Play Middleware**: Wrap any existing Express/MJS tool server in one line of code (`app.use(mcpay(...))`).
 - **Autonomous Agent (Claude 3.5)**: Powered by Claude and AI/ML API, our agent autonomously decides which tools to use, intercepts 402 "Payment Required" responses, and settles transactions using the **OWS CLI**.
