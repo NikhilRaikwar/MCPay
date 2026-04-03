@@ -26,3 +26,8 @@ Thumbs.db
 # OWS Specific
 ows-setup-logs/
 policy-backups/
+
+# Databases & Cache
+*.db3*
+*.sqlcipher_salt
+xmtp-dev-*

@@ -13,9 +13,10 @@ interface MCPayConfig {
   description: string        // tool kya karta hai
   network?: `${string}:${string}`   // default: "eip155:84532" (Base Sepolia)
   facilitatorUrl?: string    // default: x402.org
+  onPayment?: (stats: MCPayStats) => Promise<void> // NEW: Optional callback
 }
 
-interface MCPayStats {
+export interface MCPayStats {
   toolName: string;
   totalCalls: number;
   totalEarned: number;
@@ -90,7 +91,12 @@ export function mcpay(config: MCPayConfig) {
           }
         }
         
-        console.log(`💰 MCPay: ${toolName} earned ${price} | Total: $${stats.totalEarned.toFixed(4)}`)
+        console.log(`MCPay: ${toolName} earned ${price} | Total: $${stats.totalEarned.toFixed(4)}`)
+        
+        // Trigger onPayment callback (async, non-blocking)
+        if (config.onPayment) {
+            config.onPayment(stats).catch(e => console.error('onPayment error:', e))
+        }
       }
       return originalJson(data)
     }

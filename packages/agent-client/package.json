@@ -12,7 +12,9 @@
     "@open-wallet-standard/core": "file:../../node_modules/@open-wallet-standard/core",
     "@types/dotenv": "^6.1.1",
     "@x402/fetch": "^2.0.0",
+    "@xmtp/node-sdk": "^6.0.0",
     "dotenv": "^17.4.0",
+    "ethers": "^6.16.0",
     "node-fetch": "^2.6.7",
     "openai": "^6.33.0"
   },
