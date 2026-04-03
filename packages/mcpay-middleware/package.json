@@ -1,5 +1,5 @@
 {
-  "name": "mcpay",
+  "name": "@nikhilraikwar/mcpay",
   "version": "1.0.0",
   "description": "The native monetization layer for MCP tool servers — x402 payment enforcement via OWS CLI",
   "main": "dist/index.js",

@@ -11,7 +11,7 @@ import Link from "next/link";
 const TICKER_ITEMS = [
   "x402 Payment Protocol", "OWS CLI Wallet Signing", "Base Sepolia USDC", "XMTP Wallet Receipts",
   "Zerion Real Balances", "Dynamic Surge Pricing", "AIML API Inference", "Claude · GPT-4o · Gemini",
-  "No API Keys — Ever", "Agent-Native Payments", "npm install mcpay", "Live on Base Sepolia",
+  "No API Keys — Ever", "Agent-Native Payments", "npm i @nikhilraikwar/mcpay", "Live on Base Sepolia",
 ];
 
 const FLOW_STEPS = [
@@ -46,7 +46,7 @@ const INTEGRATIONS = [
 ];
 
 const SDK_CARDS = [
-  { name:"mcpay middleware",  pkg:"npm install mcpay",                                desc:"3-line Express middleware. Wraps any route with x402 enforcement, OWS wallet destination, XMTP notification dispatch, and stats tracking. Ships to npm.",              status:"done", label:"Shipped ✓" },
+  { name:"mcpay middleware",  pkg:"npm install @nikhilraikwar/mcpay",                     desc:"3-line Express middleware. Wraps any route with x402 enforcement, OWS wallet destination, XMTP notification dispatch, and stats tracking. Ships to npm.",              status:"done", label:"Shipped ✓" },
   { name:"x402 Agent Client", pkg:"ows pay request <url> --wallet mcpay-agent",     desc:"OWS CLI is the agent's payment engine. Evaluates spend policy, signs USDC transfers on Base Sepolia, and retries the original request after settlement.",          status:"done", label:"Shipped ✓" },
   { name:"AI Playground",     pkg:"localhost:3000 → AI Playground tab",             desc:"ChatGPT-style interface where any prompt triggers a real agent loop: Plan → OWS Pay → Execute → Respond. Full live demo with payment receipts visible.",           status:"done", label:"Shipped ✓" },
   { name:"XMTP Notifier",     pkg:"import { sendPaymentAlert } from './xmtp'",       desc:"On every x402 settlement, MCPay sends a wallet-to-wallet XMTP message to the tool owner. Receipt goes to agent's XMTP inbox. No email, no config.",              status:"done", label:"Shipped ✓" },
@@ -76,7 +76,7 @@ export default function LandingPage() {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText("npm install mcpay");
+    navigator.clipboard.writeText("npm install @nikhilraikwar/mcpay");
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
@@ -144,7 +144,7 @@ export default function LandingPage() {
 
         <div className="install-strip">
           <span className="install-label">Install</span>
-          <span className="install-cmd">npm install mcpay</span>
+          <span className="install-cmd">npm install @nikhilraikwar/mcpay</span>
           <button className="copy-btn" onClick={handleCopy}>
             {copied ? "Copied!" : "Copy"}
           </button>

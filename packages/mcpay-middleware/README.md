@@ -5,7 +5,7 @@
 Wrap any Express route with **x402 micropayment enforcement** in 3 lines. Agents pay automatically via **OWS CLI**. Settlements land on **Base Sepolia** as real USDC. No API keys, no accounts, no subscriptions.
 
 ```bash
-npm install mcpay
+npm install @nikhilraikwar/mcpay
 ```
 
 ---
