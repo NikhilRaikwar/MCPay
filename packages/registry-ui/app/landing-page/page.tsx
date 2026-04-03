@@ -19,7 +19,7 @@ const FLOW_STEPS = [
   { n:"02", t:"402 Payment Required",   d:"MCPay middleware intercepts instantly, returning HTTP 402 with x402 headers: USDC amount, destination OWS wallet, and Base Sepolia chain ID.",                             tag:"x402 Protocol"   },
   { n:"03", t:"OWS Wallet Signs",       d:"The agent's OWS CLI evaluates spend policy (maxPrice, chain allowlist), signs the USDC transfer with its private key, and broadcasts to Base Sepolia.",                   tag:"OWS CLI + EIP-155" },
   { n:"04", t:"x402 Verifies On-Chain", d:"MCPay's x402 facilitator confirms the on-chain USDC transfer. Only after cryptographic verification does the tool execute and return results.",                            tag:"Trustless"        },
-  { n:"05", t:"XMTP + Dashboard",       d:"Owner receives XMTP wallet notification instantly. Dashboard updates with real Zerion balance, call count, and settlement proof — all verifiable on-chain.",              tag:"Live Proof"       },
+  { n:"05", t:"XMTP Notifications",  d:"Owner receives XMTP wallet notification instantly. Every request generated a cryptographically signed receipt stored directly in the agent's XMTP inbox — verifiable on-chain.",           tag:"On-Chain Proof"   },
 ];
 
 const INTEGRATIONS = [
@@ -106,13 +106,13 @@ export default function LandingPage() {
               {label}
             </a>
           ))}
-          <Link href="/dashboard" style={{
+          <a href="https://github.com/NikhilRaikwar/MCPay" target="_blank" rel="noreferrer" style={{
             background:"var(--green)", color:"var(--bg)", padding:"8px 20px",
             fontFamily:"var(--mono)", fontSize:11, fontWeight:700, letterSpacing:"0.08em",
             textTransform:"uppercase", textDecoration:"none"
           }}>
-            Live Dashboard →
-          </Link>
+            GitHub Repo →
+          </a>
         </div>
       </nav>
 
@@ -139,7 +139,7 @@ export default function LandingPage() {
 
         <div className="hero-btns">
           <a href="#sdk" className="btn-primary">Get Started →</a>
-          <Link href="/dashboard" className="btn-ghost">Live Dashboard</Link>
+          <a href="#how" className="btn-ghost">How it Works</a>
         </div>
 
         <div className="install-strip">
@@ -326,9 +326,9 @@ app.<span class="fn">use</span>(...<span class="fn">mcpay</span>({
           <p>Built by <strong style={{color:"var(--white)"}}>Nikhil Raikwar</strong></p>
           <p style={{color:"var(--green)", marginTop:4}}>OWS Hackathon 2026 · Track 03</p>
           <p style={{marginTop:12}}>Pay-Per-Call Services &amp; API Monetization</p>
-          <Link href="/dashboard" style={{color:"var(--green)", textDecoration:"none", fontSize:11}}>
-            Live Dashboard →
-          </Link>
+          <a href="https://github.com/NikhilRaikwar/MCPay" target="_blank" rel="noreferrer" style={{color:"var(--green)", textDecoration:"none", fontSize:11}}>
+            GitHub Repository →
+          </a>
         </div>
       </footer>
 
