@@ -186,22 +186,24 @@ export default function LandingPage() {
           <div className="code-wrap" data-file="server.ts">
             <div className="dots"><span className="dr"/><span className="dy"/><span className="dg"/></div>
             <pre dangerouslySetInnerHTML={{ __html: `<span class="kw">import</span> <span class="fn">express</span> <span class="kw">from</span> <span class="st">'express'</span>
-<span class="kw">import</span> { <span class="fn">mcpay</span> } <span class="kw">from</span> <span class="st">'mcpay'</span>         <span class="cm">// npm install mcpay</span>
+<span class="kw">import</span> { <span class="fn">mcpay</span> } <span class="kw">from</span> <span class="st">'@nikhilraikwar/mcpay'</span>  <span class="cm">// npm i @nikhilraikwar/mcpay</span>
 
 <span class="kw">const</span> app = <span class="fn">express</span>()
 
 <span class="cm">// ── TOOL 1: Weather — $0.01 flat ──</span>
 app.<span class="fn">use</span>(...<span class="fn">mcpay</span>({
   price:         <span class="st">'$0.01'</span>,
-  walletAddress: process.env.<span class="fn">TOOL_WALLET</span>,
+  walletAddress: process.env.<span class="fn">TOOL_WALLET_ADDRESS</span>,
   toolName:      <span class="st">'weather-data'</span>,
+  description:   <span class="st">'Real-time weather for any city'</span>,
 }))
 
 <span class="cm">// ── TOOL 2: AI Inference — dynamic pricing by model ──</span>
 app.<span class="fn">use</span>(...<span class="fn">mcpay</span>({
   price:         (<span class="fn">req</span>) => <span class="fn">getDynamicPrice</span>(req.body.model),
-  walletAddress: process.env.<span class="fn">TOOL_WALLET</span>,
+  walletAddress: process.env.<span class="fn">TOOL_WALLET_ADDRESS</span>,
   toolName:      <span class="st">'ai-inference'</span>,
+  description:   <span class="st">'Pay-per-inference across 5 AI models'</span>,
 }))` }} />
           </div>
         </div>
@@ -248,16 +250,16 @@ app.<span class="fn">use</span>(...<span class="fn">mcpay</span>({
           <div className="code-wrap" data-file="agent.ts" style={{marginTop:0}}>
             <div className="dots"><span className="dr"/><span className="dy"/><span className="dg"/></div>
             <pre dangerouslySetInnerHTML={{ __html: `<span class="cm">// Agent-side: mcpayFetch auto-handles 402 + OWS payment</span>
-<span class="kw">import</span> { <span class="fn">mcpayFetch</span> } <span class="kw">from</span> <span class="st">'mcpay'</span>
+<span class="kw">import</span> { <span class="fn">mcpayFetch</span> } <span class="kw">from</span> <span class="st">'@nikhilraikwar/mcpay'</span>
 
-<span class="kw">const</span> result = <span class="kw">await</span> <span class="fn">mcpayFetch</span>(<span class="st">'http://tools.mcpay.dev/weather-data'</span>, {
+<span class="kw">const</span> result = <span class="kw">await</span> <span class="fn">mcpayFetch</span>(<span class="st">'http://localhost:3001/tools/weather-data'</span>, {
   method:    <span class="st">'POST'</span>,
   body:      <span class="fn">JSON.stringify</span>({ city: <span class="st">'Delhi'</span> }),
   owsWallet: <span class="st">'mcpay-agent'</span>,   <span class="cm">// OWS wallet name</span>
   maxPrice:  <span class="st">'$0.05'</span>            <span class="cm">// OWS policy ceiling</span>
 })
-<span class="cm">// → { temperature: '28', city: 'Delhi', _mcpay: { paid: '$0.01' } }</span>
-<span class="cm">// That's it. 402 intercepted, OWS paid, result returned. 🎉</span>` }} />
+<span class="cm">// → { city: 'Delhi', temperature: '28°C', _mcpay: { paid: '$0.01' } }</span>
+<span class="cm">// 402 intercepted → OWS CLI pays → result returned automatically</span>` }} />
           </div>
         </div>
       </div>
