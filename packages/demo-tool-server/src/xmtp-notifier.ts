@@ -1,5 +1,6 @@
 import { Client, type Signer, IdentifierKind } from '@xmtp/node-sdk'
 import { Wallet } from 'ethers'
+import * as path from 'path'
 
 // ==========================================
 // XMTP CLIENT SETUP
@@ -40,8 +41,12 @@ export async function initXMTP(): Promise<void> {
     // Stable encryption key based on private key parts to avoid salt issues
     const dbEncryptionKey = Buffer.alloc(32, privateKey.slice(2, 34), 'hex')
     
+    // Stable database path for server to avoid 10/10 installation limit
+    const dbPath = path.join(process.cwd(), 'xmtp-server.db')
+    
     xmtpClient = await Client.create(signer, {
-      dbEncryptionKey
+      dbEncryptionKey,
+      dbPath
     })
     
     console.log('XMTP initialized for tool server:', xmtpClient.inboxId)

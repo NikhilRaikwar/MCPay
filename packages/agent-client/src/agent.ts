@@ -79,9 +79,13 @@ async function sendXmtpReceipt(message: string) {
     })
 
     const safeId = wallet.address.toLowerCase().replace(/[^a-z0-9]/g, '')
+    // Use a stable path in the workspace instead of os.tmpdir() + Date.now()
+    // This avoids hitting the 10/10 installations limit on restarts
+    const dbPath = path.join(process.cwd(), `xmtp-agent-${safeId}.db`)
+    
     const client = await XmtpClient.create(signer, { 
       dbEncryptionKey,
-      dbPath: path.join(os.tmpdir(), `xmtp-${safeId}-${Date.now()}.db`)
+      dbPath
     })
     
     // Use the OWS Tool Wallet as recipient
@@ -211,7 +215,8 @@ async function runAgent(userQuery: string) {
   const messages: any[] = [{ role: 'user', content: userQuery }]
   
   while (true) {
-    await reportLog('PLAN', `Thinking via ${MODEL}...`)
+    try {
+      await reportLog('PLAN', `Thinking via ${MODEL}...`)
     const response = await (openai.chat.completions.create({
       model: MODEL,
       messages,
@@ -221,11 +226,14 @@ async function runAgent(userQuery: string) {
     const message = response.choices[0].message
     
     if (message.tool_calls) {
-      messages.push({
-          role: 'assistant',
-          content: message.content || "",
-          tool_calls: message.tool_calls
-      })
+      const assistantMsg: any = {
+        role: 'assistant',
+        tool_calls: message.tool_calls
+      }
+      // Omit empty content entirely to avoid "Invalid payload" errors with some models
+      if (message.content) assistantMsg.content = message.content
+      
+      messages.push(assistantMsg)
       
       for (const toolCall of (message.tool_calls as any[])) {
         console.log(`\nTool suggested: ${toolCall.function.name}`)
@@ -271,6 +279,13 @@ async function runAgent(userQuery: string) {
       console.log(`\nFinal Response:\n${message.content}\n`)
       await reportLog('DONE', `Response: ${message.content}`)
       return
+    }
+    } catch (e: any) {
+      const errorData = e.response?.data || e.error || e
+      console.error(`\n[AGENT-FATAL] ${e.message}`)
+      console.error(`Payload Data:`, JSON.stringify(errorData, null, 2))
+      await reportLog('DONE', `Critical Error: ${e.message}`)
+      return // Exit on fatal error to avoid Infinite 400s
     }
   }
 }
