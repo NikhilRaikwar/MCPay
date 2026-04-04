@@ -324,7 +324,6 @@ app.<span class="fn">use</span>(...<span class="fn">mcpay</span>({
         </div>
         <div className="foot-r">
           <p>Built by <strong style={{color:"var(--white)"}}>Nikhil Raikwar</strong></p>
-          <p style={{color:"var(--green)", marginTop:4}}>OWS Hackathon 2026 · Track 03</p>
           <p style={{marginTop:12}}>Pay-Per-Call Services &amp; API Monetization</p>
           <a href="https://github.com/NikhilRaikwar/MCPay" target="_blank" rel="noreferrer" style={{color:"var(--green)", textDecoration:"none", fontSize:11}}>
             GitHub Repository →
